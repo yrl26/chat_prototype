@@ -1,0 +1,309 @@
+<html>
+<head>
+    <style>
+        .container{
+            display: inline-block;
+            width: 20%;
+            border: 1px solid black;
+            vertical-align: top;    
+        }
+        .input-container{
+            margin-bottom: 1%;
+            padding: 10;
+            vertical-align: top;
+        }
+        .chat-container{
+            padding: 10;
+        }
+    </style>
+</head>
+<body>
+    <div>
+        <span>
+            <label>Current User</label>
+            <input type="Text" id="user">
+            <button type="button" onclick="startSystem()">Confirm</button>
+            <span id="token">
+                
+            </span>
+        </span>
+    </div>
+    <div>
+        <span>
+            <!--<button type="button" onclick="getMessages(2,1)">Open Chat with User 2</button>-->
+            <button type="button" onclick="setChatInformation(1)">Open Chat with User 1</button>
+            <button type="button" onclick="setChatInformation(2)">Open Chat with User 2</button>
+            <button type="button" onclick="setChatInformation(3)">Open Chat with User 3</button>
+            <button type="button" onclick="setChatInformation(17)">Open Chat with User 17</button>
+        </span>
+    </div>
+    <div class="container">
+        <div>
+            <label>Message</label>
+            <input type="text" id="message-input"/>
+        </div>
+        <div>
+            <button type="button" onclick="chatController()">Send</button>
+        </div>
+    </div>
+    <div class="container">
+        <label>Chat Messages</label>
+        <ul id="chat">
+            
+        </ul>
+    </div>
+    <div class="container">
+        <label>Chat Bubbles</label>
+        <ul id="chat-bubble">
+            
+        </ul>
+    </div>
+    <div class="container">
+        <label>Notification</label>
+        <ul id="notification">
+            
+        </ul>
+    </div>
+</body>
+</html>
+
+<script>
+/*
+setTimeout or setInterval for checking chat inactivity
+first paramater is function without parenthesis. ie: setInterval(test, 2000);
+
+foreach loop -> for of loop(JS)
+*/
+
+let currentUserId = null;
+let currentActiveChat = null;
+let currentRecipientId = null;
+let lastMessageReadId = 0; //This should get updated whenever the user opens a new chat bubble
+let sseMessageStartId = null;
+let events = null;
+let token = null;
+let sseToken = null;
+let notificationsCount = null;
+
+
+async function startSystem(){
+    await setCurrentUser(); //token gets set too
+    /*lastMessageReadId = await getLastMessageRead(currentUserId);
+    notificationsCount = await getUnreadMessagesCount(currentUserId, lastMessageReadId);
+    console.log(notificationsCount);
+    sseMessageStartId = await getMostRecentMessage(currentUserId, token);
+    sseToken = await getSSEAuthToken(currentUserId, token);
+    console.log(sseToken);
+    openSSEConnection(currentUserId, sseToken);
+    appendTochatBubbleTab(notificationsCount);*/
+}
+
+async function getLastMessageRead(currentUserId){
+    const response = await fetch(`http://192.168.1.68/chat_prototype/Backend/getLastMessageRead.php?userId=${currentUserId}`,
+        {
+            method: "GET",
+            headers:{
+                "Authorization":`Bearer ${token}`
+            }
+        }
+    );
+    const data = await response.json();
+
+    return data.lastMessageReadId;
+}
+
+
+async function getUnreadMessagesCount(currentUserId, lastMessageReadId){
+    const response = await fetch(`http://192.168.1.68/chat_prototype/Backend/getUnreadMessagesCount.php?userId=${currentUserId}&lastMessageReadId=${lastMessageReadId}`,
+        {
+            method: "GET",
+            headers:{
+                "Authorization":`Bearer ${token}`
+            }
+        }
+    );
+    const data = await response.json();
+
+    return data;
+}
+
+
+async function getSSEAuthToken($userId, $token){
+    const response = await fetch("http://192.168.1.68/chat_prototype/Backend/generateSSEAuthToken.php",
+        {
+            method: "POST",
+            headers:{
+                "Authorization":`Bearer ${token}`
+            },
+            body: JSON.stringify({
+                userId: currentUserId
+            })
+        }
+    );
+
+    const data = await response.json();
+    return data;
+}
+
+async function getMostRecentMessage($currentUserId, $token){
+    const response = await fetch(`http://192.168.1.68/chat_prototype/Backend/getMostRecentMessage.php?userId=${currentUserId}`,
+        {
+            method: "GET",
+            headers:{
+                "Authorization":`Bearer ${token}`
+            }
+        }
+    );
+    const data = await response.json();
+    return data.id;
+}
+function openSSEConnection($currentUserId, $sseToken){
+    events = new EventSource(`http://192.168.1.68/chat_prototype/Backend/newMessagesSSE.php?chatId=${currentActiveChat}&messageId=${sseMessageStartId}&sseToken=${sseToken}`);
+
+    events.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log(data);
+            for(element of data){
+                if(element.chat_id == currentActiveChat){
+                    chatList = document.getElementById("chat");
+                    newLine = document.createElement("li");
+                    newLine.innerHTML = element.id + " " + element.message;
+                    chatList.appendChild(newLine);
+                }
+                else{
+                    let user = notificationsCount.find(user => user.username === element.username);
+                    if(user){
+                        user.unread += 1;
+                        appendTochatBubbleTab(notificationsCount);
+                    }
+                    else{
+                        notificationsCount.push({
+                            username: element.username,
+                            unread: 1
+                        });
+                        console.log(notificationsCount);
+                        appendTochatBubbleTab(notificationsCount);
+                    }
+                }
+            }
+            
+    }
+}
+
+async function setCurrentUser(){
+    currentUserId = document.getElementById("user").value;
+    console.log("Current user is: " + currentUserId);
+    const response = await fetch("http://192.168.1.68/chat_prototype/Backend/tokenGenerator.php",{
+        method: "GET",
+        headers:{
+            "userId": currentUserId
+        }
+    });
+    token = await response.json();
+    appendToTokenTab(token);
+}
+
+
+async function setChatInformation(userId){ //userId is chatMemberId
+    const response = await fetch("http://192.168.1.68/chat_prototype/Backend/findOrCreateChat.php",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type":"application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                currentUser: currentUserId,
+                chatMemberId: userId
+            })
+        }
+    )
+    const data = await response.json();
+    currentActiveChat = data.chat_id;
+    currentRecipientId = userId;
+    getMessages(currentActiveChat);
+}
+
+function chatController(){
+    sendMessage(currentActiveChat, currentUserId);
+}
+async function sendMessage(chatId){
+    const messageInput = document.getElementById("message-input").value;
+    const response = await fetch("http://192.168.1.68/chat_prototype/Backend/sendMessage.php",
+        {
+            method: "POST",
+            headers: {
+                "Content-Type":"application/json",
+                "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                chat: chatId,
+                user: currentUserId,
+                recipient: currentRecipientId,
+                message: messageInput
+            })
+        }
+    )
+    const data = await response.json();
+    console.log(data);
+}
+
+async function getMessages(chatId){
+    const response = await fetch(`http://192.168.1.68/chat_prototype/Backend/getChatMessages.php?chatId=${currentActiveChat}`,
+        {
+            method: "GET",
+            headers:{
+                "Authorization": `Bearer ${token}`
+            }
+        }
+    );
+    const data = await response.json();
+    if(data.length > 0){
+        createLine(data);
+        lastMessageId = data[data.length - 1].id;
+        console.log("last chat id is: " + lastMessageId);
+    }
+    else{
+        console.log("No Messages!");
+    }
+}
+
+
+/******************/
+function createLine(data){
+    chatList = document.getElementById("chat");
+    for(element of data){
+        li = document.createElement("li");
+        li.innerHTML = element.id +" "+ element.message;
+        chatList.appendChild(li);
+    }
+}
+
+function appendToNotificationTab(data){
+    const notificationTab = document.getElementById("notification");
+    notificationTab.replaceChildren();
+
+    for(element of data){
+        li = document.createElement("li");
+        li.innerHTML = "Received message from: " + element.username;
+        notificationTab.appendChild(li);
+    }
+}
+
+function appendTochatBubbleTab(data){
+    const chatBubble = document.getElementById("chat-bubble");
+    chatBubble.replaceChildren();
+    for(element of data){
+        li = document.createElement("li");
+        li.innerHTML = "Received message from: " + element.username + `(${element.unread})`;
+        chatBubble.appendChild(li);
+    }
+}
+
+function appendToTokenTab(token){
+    tokenTab = document.getElementById("token");
+    tokenTab.innerHTML = token;
+}
+
+
+</script>
